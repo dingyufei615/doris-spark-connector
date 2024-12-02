@@ -34,6 +34,9 @@ public interface ConfigurationOptions {
     String TABLE_IDENTIFIER = "table.identifier";
     String DORIS_TABLE_IDENTIFIER = "doris.table.identifier";
     String DORIS_READ_FIELD = "doris.read.field";
+    // To convert the datetimev2 to timestamp
+    String DORIS_READ_DATETIMEV2_AS_TIMESTAMP_ENABLED = "doris.read.datetimev2.as.timestamp.enabled";
+    boolean DORIS_READ_DATETIMEV2_AS_TIMESTAMP_ENABLED_DEFAULT = false;
     String DORIS_FILTER_QUERY = "doris.filter.query";
     String DORIS_FILTER_QUERY_IN_MAX_COUNT = "doris.filter.query.in.max.count";
     int DORIS_FILTER_QUERY_IN_VALUE_UPPER_LIMIT = 10000;

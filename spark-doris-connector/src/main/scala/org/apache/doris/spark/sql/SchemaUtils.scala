@@ -21,7 +21,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import org.apache.commons.lang3.StringUtils
 import org.apache.doris.sdk.thrift.{TPrimitiveType, TScanColumnDesc}
-import org.apache.doris.spark.cfg.ConfigurationOptions.DORIS_READ_FIELD
+import org.apache.doris.spark.cfg.ConfigurationOptions._
 import org.apache.doris.spark.cfg.Settings
 import org.apache.doris.spark.exception.DorisException
 import org.apache.doris.spark.rest.RestService
@@ -55,7 +55,9 @@ private[spark] object SchemaUtils {
     val hllColumns = schema.getProperties.filter(_.getType.equalsIgnoreCase("HLL")).map(_.getName).mkString(",")
     cfg.setProperty(DORIS_HLL_COLUMNS, hllColumns)
     val dorisReadField = cfg.getProperty(DORIS_READ_FIELD)
-    convertToStruct(schema, dorisReadField)
+    val datetimev2AsTimestampEnabled = cfg.getBooleanProperty(DORIS_READ_DATETIMEV2_AS_TIMESTAMP_ENABLED,
+      DORIS_READ_DATETIMEV2_AS_TIMESTAMP_ENABLED_DEFAULT)
+    convertToStruct(schema, dorisReadField, datetimev2AsTimestampEnabled)
   }
 
   /**
@@ -74,7 +76,7 @@ private[spark] object SchemaUtils {
    * @param schema inner schema
    * @return Spark Catalyst StructType
    */
-  def convertToStruct(schema: Schema, dorisReadFields: String): StructType = {
+  def convertToStruct(schema: Schema, dorisReadFields: String, datetimev2AsTimestampEnabled: Boolean): StructType = {
     val fieldList = if (dorisReadFields != null && dorisReadFields.nonEmpty) {
       dorisReadFields.split(",")
     } else {
@@ -85,7 +87,7 @@ private[spark] object SchemaUtils {
       .map(f =>
         DataTypes.createStructField(
           f.getName,
-          getCatalystType(f.getType, f.getPrecision, f.getScale),
+          getCatalystType(f.getType, f.getPrecision, f.getScale, datetimev2AsTimestampEnabled),
           true
         )
       )
@@ -100,7 +102,7 @@ private[spark] object SchemaUtils {
    * @param scale     decimal scale
    * @return Spark Catalyst type
    */
-  def getCatalystType(dorisType: String, precision: Int, scale: Int): DataType = {
+  def getCatalystType(dorisType: String, precision: Int, scale: Int, datetimev2AsTimestampEnabled: Boolean = false): DataType = {
     dorisType match {
       case "NULL_TYPE"       => DataTypes.NullType
       case "BOOLEAN"         => DataTypes.BooleanType
@@ -113,7 +115,7 @@ private[spark] object SchemaUtils {
       case "DATE"            => DataTypes.DateType
       case "DATEV2"          => DataTypes.DateType
       case "DATETIME"        => DataTypes.StringType
-      case "DATETIMEV2"      => DataTypes.StringType
+      case "DATETIMEV2"      => if(datetimev2AsTimestampEnabled) DataTypes.TimestampType else DataTypes.StringType
       case "BINARY"          => DataTypes.BinaryType
       case "DECIMAL"         => DecimalType(precision, scale)
       case "CHAR"            => DataTypes.StringType

@@ -88,7 +88,7 @@ class ScalaADBCValueReader(partition: PartitionDefinition, settings: Settings) e
     if (!eos.get && (rowBatch == null || !rowBatch.hasNext)) {
       eos.set(!arrowReader.loadNextBatch())
       if (!eos.get) {
-        rowBatch = new RowBatch(arrowReader, schema)
+        rowBatch = new RowBatch(arrowReader, schema, settings)
       }
     }
     !eos.get

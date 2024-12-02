@@ -58,6 +58,8 @@ import org.apache.commons.lang3.ArrayUtils;
 import org.apache.doris.sdk.thrift.TScanBatchResult;
 import org.apache.doris.sdk.thrift.TStatus;
 import org.apache.doris.sdk.thrift.TStatusCode;
+import org.apache.doris.spark.cfg.ConfigurationOptions;
+import org.apache.doris.spark.cfg.PropertiesSettings;
 import org.apache.doris.spark.exception.DorisException;
 import org.apache.doris.spark.rest.RestService;
 import org.apache.doris.spark.rest.models.Schema;
@@ -76,13 +78,11 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.sql.Date;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.NoSuchElementException;
+import java.util.*;
 
 import static org.hamcrest.core.StringStartsWith.startsWith;
 import static org.junit.Assert.assertEquals;
@@ -1366,6 +1366,99 @@ public class TestRowBatch {
         thrown.expect(DorisException.class);
         thrown.expectMessage(startsWith("Unsupported type for DATETIMEV2"));
         new RowBatch(scanBatchResult, schema);
+    }
+    @Test
+    public void testDateTimeV2AsTimestamp() throws IOException, DorisException {
+
+        ImmutableList.Builder<Field> childrenBuilder = ImmutableList.builder();
+        childrenBuilder.add(new Field("k1", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.MICROSECOND,
+                null)), null));
+        childrenBuilder.add(new Field("k2", FieldType.nullable(new ArrowType.Timestamp(TimeUnit.MILLISECOND,
+                null)), null));
+
+        VectorSchemaRoot root = VectorSchemaRoot.create(
+                new org.apache.arrow.vector.types.pojo.Schema(childrenBuilder.build(), null),
+                new RootAllocator(Integer.MAX_VALUE));
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        ArrowStreamWriter arrowStreamWriter = new ArrowStreamWriter(
+                root,
+                new DictionaryProvider.MapDictionaryProvider(),
+                outputStream);
+
+        arrowStreamWriter.start();
+        root.setRowCount(3);
+
+        LocalDateTime localDateTime = LocalDateTime.of(2024, 11, 29,
+                0, 0, 0, 123456000);
+        long second = localDateTime.atZone(ZoneId.systemDefault()).toEpochSecond();
+        int nano = localDateTime.getNano();
+
+        FieldVector vector = root.getVector("k1");
+        TimeStampMicroVector datetimeV2Vector = (TimeStampMicroVector) vector;
+        datetimeV2Vector.setInitialCapacity(3);
+        datetimeV2Vector.allocateNew();
+        datetimeV2Vector.setIndexDefined(0);
+        datetimeV2Vector.setSafe(0, second);
+        datetimeV2Vector.setIndexDefined(1);
+        datetimeV2Vector.setSafe(1, second * 1000 + nano / 1000000);
+        datetimeV2Vector.setIndexDefined(2);
+        datetimeV2Vector.setSafe(2, second * 1000000 + nano / 1000);
+        vector.setValueCount(3);
+
+        vector = root.getVector("k2");
+        TimeStampMilliVector milliVector = (TimeStampMilliVector) vector;
+        milliVector.setIndexDefined(3);
+        milliVector.allocateNew();
+        milliVector.setIndexDefined(0);
+        milliVector.setSafe(0, 1732809600000L); // 2024-11-29 00:00:00
+        milliVector.setIndexDefined(1);
+        milliVector.setSafe(1, 1732809600123L);
+        milliVector.setIndexDefined(2);
+        milliVector.setSafe(2, 1732809600999L);
+        vector.setValueCount(3);
+
+        arrowStreamWriter.writeBatch();
+
+        arrowStreamWriter.end();
+        arrowStreamWriter.close();
+
+        TStatus status = new TStatus();
+        status.setStatusCode(TStatusCode.OK);
+        TScanBatchResult scanBatchResult = new TScanBatchResult();
+        scanBatchResult.setStatus(status);
+        scanBatchResult.setEos(false);
+        scanBatchResult.setRows(outputStream.toByteArray());
+
+
+        String schemaStr = "{\"properties\":[" +
+                "{\"type\":\"DATETIMEV2\",\"name\":\"k1\",\"comment\":\"\"}" +
+                ",{\"type\":\"DATETIMEV2\",\"name\":\"k2\",\"comment\":\"\"}" +
+                "], \"status\":200}";
+
+        Schema schema = RestService.parseSchema(schemaStr, logger);
+        Properties properties = new Properties();
+        properties.setProperty(ConfigurationOptions.DORIS_READ_DATETIMEV2_AS_TIMESTAMP_ENABLED, "true");
+        RowBatch rowBatch = new RowBatch(scanBatchResult, schema, new PropertiesSettings(properties));
+
+        Assert.assertTrue(rowBatch.hasNext());
+        List<Object> actualRow0 = rowBatch.next();
+        Assert.assertEquals(Timestamp.valueOf("2024-11-29 00:00:00"), actualRow0.get(0));
+        Assert.assertEquals(Timestamp.valueOf("2024-11-29 00:00:00.0"), actualRow0.get(1));
+
+
+        List<Object> actualRow1 = rowBatch.next();
+        Assert.assertEquals(Timestamp.valueOf("2024-11-29 00:00:00.123"), actualRow1.get(0));
+        Assert.assertEquals(Timestamp.valueOf("2024-11-29 00:00:00.123"), actualRow1.get(1));
+
+        List<Object> actualRow2 = rowBatch.next();
+        Assert.assertEquals(Timestamp.valueOf("2024-11-29 00:00:00.123456"), actualRow2.get(0));
+        Assert.assertEquals(Timestamp.valueOf("2024-11-29 00:00:00.999"), actualRow2.get(1));
+
+        Assert.assertFalse(rowBatch.hasNext());
+        thrown.expect(NoSuchElementException.class);
+        thrown.expectMessage(startsWith("Get row offset:"));
+        rowBatch.next();
+
     }
 
 }

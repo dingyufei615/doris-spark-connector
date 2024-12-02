@@ -147,7 +147,7 @@ class ScalaValueReader(partition: PartitionDefinition, settings: Settings) exten
         val nextResult = lockClient(_.getNext(nextBatchParams))
         eos.set(nextResult.isEos)
         if (!eos.get) {
-          val rowBatch = new RowBatch(nextResult, schema)
+          val rowBatch = new RowBatch(nextResult, schema, settings)
           offset += rowBatch.getReadRowCount
           rowBatch.close()
           rowBatchBlockingQueue.put(rowBatch)
@@ -205,7 +205,7 @@ class ScalaValueReader(partition: PartitionDefinition, settings: Settings) exten
         val nextResult = lockClient(_.getNext(nextBatchParams))
         eos.set(nextResult.isEos)
         if (!eos.get) {
-          rowBatch = new RowBatch(nextResult, schema)
+          rowBatch = new RowBatch(nextResult, schema, settings)
         }
       }
       hasNext = !eos.get

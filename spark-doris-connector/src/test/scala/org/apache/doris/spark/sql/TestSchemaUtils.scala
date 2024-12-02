@@ -37,14 +37,17 @@ class TestSchemaUtils extends ExpectedExceptionTest {
     schema.setStatus(200)
     val k1 = new Field("k1", "TINYINT", "", 0, 0, "")
     val k5 = new Field("k5", "BIGINT", "", 0, 0, "")
+    val k7 = new Field("k7", "DATETIMEV2", "", 0, 0, "")
     schema.put(k1)
     schema.put(k5)
+    schema.put(k7)
 
     var fields = List[StructField]()
     fields :+= DataTypes.createStructField("k1", DataTypes.ByteType, true)
     fields :+= DataTypes.createStructField("k5", DataTypes.LongType, true)
+    fields :+= DataTypes.createStructField("k7", DataTypes.TimestampType, true)
     val expected = DataTypes.createStructType(fields.asJava)
-    Assert.assertEquals(expected, SchemaUtils.convertToStruct(schema, "k1,k5"))
+    Assert.assertEquals(expected, SchemaUtils.convertToStruct(schema, "k1,k5,k6,k7", true))
   }
 
   @Test
@@ -60,6 +63,7 @@ class TestSchemaUtils extends ExpectedExceptionTest {
     Assert.assertEquals(DataTypes.DateType, SchemaUtils.getCatalystType("DATE", 0, 0))
     Assert.assertEquals(DataTypes.StringType, SchemaUtils.getCatalystType("DATETIME", 0, 0))
     Assert.assertEquals(DataTypes.StringType, SchemaUtils.getCatalystType("DATETIMEV2", 0, 0))
+    Assert.assertEquals(DataTypes.TimestampType, SchemaUtils.getCatalystType("DATETIMEV2", 0, 0, true))
     Assert.assertEquals(DataTypes.BinaryType, SchemaUtils.getCatalystType("BINARY", 0, 0))
     Assert.assertEquals(DecimalType(9, 3), SchemaUtils.getCatalystType("DECIMAL", 9, 3))
     Assert.assertEquals(DataTypes.StringType, SchemaUtils.getCatalystType("CHAR", 0, 0))

@@ -45,6 +45,8 @@ import org.apache.arrow.vector.ipc.ArrowStreamReader;
 import org.apache.arrow.vector.types.Types;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.doris.sdk.thrift.TScanBatchResult;
+import org.apache.doris.spark.cfg.ConfigurationOptions;
+import org.apache.doris.spark.cfg.Settings;
 import org.apache.doris.spark.exception.DorisException;
 import org.apache.doris.spark.rest.models.Schema;
 import org.apache.doris.spark.util.IPUtils;
@@ -59,6 +61,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.sql.Date;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -83,6 +86,7 @@ public class RowBatch {
     private final ArrowReader arrowReader;
     private final Schema schema;
     private static final ZoneId DEFAULT_ZONE_ID = ZoneId.systemDefault();
+    private boolean datetimev2AsTimestampEnabled = false;
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = new DateTimeFormatterBuilder()
             .appendPattern("yyyy-MM-dd HH:mm:ss")
@@ -104,7 +108,13 @@ public class RowBatch {
     private List<FieldVector> fieldVectors;
 
     public RowBatch(TScanBatchResult nextResult, Schema schema) throws DorisException {
+        this(nextResult, schema, null);
+    }
 
+    public RowBatch(TScanBatchResult nextResult, Schema schema, Settings settings) throws DorisException {
+        if (settings != null) {
+            this.datetimev2AsTimestampEnabled = settings.getBooleanProperty(ConfigurationOptions.DORIS_READ_DATETIMEV2_AS_TIMESTAMP_ENABLED);
+        }
         this.rootAllocator = new RootAllocator(Integer.MAX_VALUE);
         this.arrowReader = new ArrowStreamReader(new ByteArrayInputStream(nextResult.getRows()), rootAllocator);
         this.schema = schema;
@@ -123,8 +133,10 @@ public class RowBatch {
 
     }
 
-    public RowBatch(ArrowReader reader, Schema schema) throws DorisException {
-
+    public RowBatch(ArrowReader reader, Schema schema, Settings settings) throws DorisException {
+        if (settings != null) {
+            this.datetimev2AsTimestampEnabled = settings.getBooleanProperty(ConfigurationOptions.DORIS_READ_DATETIMEV2_AS_TIMESTAMP_ENABLED);
+        }
         this.arrowReader = reader;
         this.schema = schema;
 
@@ -391,7 +403,11 @@ public class RowBatch {
                                     continue;
                                 }
                                 String value = new String(varCharVector.get(rowIndex), StandardCharsets.UTF_8);
-                                addValueToRow(rowIndex, value);
+                                if (datetimev2AsTimestampEnabled) {
+                                    addValueToRow(rowIndex, Timestamp.valueOf(value));
+                                } else {
+                                    addValueToRow(rowIndex, value);
+                                }
                             }
                         } else if (curFieldVector instanceof TimeStampVector) {
                             TimeStampVector timeStampVector = (TimeStampVector) curFieldVector;
@@ -401,8 +417,12 @@ public class RowBatch {
                                     continue;
                                 }
                                 LocalDateTime dateTime = getDateTime(rowIndex, timeStampVector);
-                                String formatted = DATE_TIME_FORMATTER.format(dateTime);
-                                addValueToRow(rowIndex, formatted);
+                                if (datetimev2AsTimestampEnabled) {
+                                    addValueToRow(rowIndex, Timestamp.valueOf(dateTimeV2Formatter.format((dateTime))));
+                                } else {
+                                    addValueToRow(rowIndex, DATE_TIME_FORMATTER.format(dateTime));
+                                }
+
                             }
                         } else {
                             String errMsg = String.format("Unsupported type for DATETIMEV2, minorType %s, class is %s", mt.name(), curFieldVector.getClass());
